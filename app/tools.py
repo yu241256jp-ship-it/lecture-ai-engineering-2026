@@ -4,6 +4,7 @@
 説明文を書き換えると、モデルがツールを使うかどうか・どんな引数で呼ぶかが変わる。
 """
 
+import random
 import json
 from functools import cache
 from pathlib import Path
@@ -77,3 +78,33 @@ def get_lecture_summary(lecture: int) -> str:
         available = sorted(p.stem for p in (DATA_DIR / "lectures").glob("*.md"))
         return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
     return path.read_text(encoding="utf-8")
+
+def make_quiz(lecture: int) -> str:
+    """
+    指定した講義回の内容から確認問題を1問作る。
+    利用者が確認問題やクイズを求めたときに使う。
+    """
+    glossary = load_glossary()
+
+    candidates = [
+        item for item in glossary
+        if item.get("lecture") == lecture
+    ]
+
+    if not candidates:
+        return json.dumps(
+            {
+                "error": f"第{lecture}回の用語が見つかりません"
+            },
+            ensure_ascii=False,
+        )
+
+    term = random.choice(candidates)
+
+    return json.dumps(
+        {
+            "question": f"「{term['term']}」の意味は？",
+            "answer": term["definition"],
+        },
+        ensure_ascii=False,
+    )
