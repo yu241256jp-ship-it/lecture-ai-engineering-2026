@@ -17,7 +17,7 @@ import sqlite_vec
 from app.config import (
     EMBEDDING_DIMENSIONS, EMBEDDING_MAX_TOKENS, EMBEDDING_MODEL,
     RAG_DB, RAG_DOCUMENT_IDS, RAG_SOURCE, RAG_TOP_K, RAG_TREE, get_api_key,
-    RAG_GRAPH, GRAPH_START_K, GRAPH_HOPS, GRAPH_MAX_RESULTS,
+    RAG_GRAPH, GRAPH_START_K, GRAPH_HOPS, GRAPH_MAX_RESULTS, HYBRID_MAX_RESULTS,
 )
 
 
@@ -124,7 +124,7 @@ def open_index(path: Path):
         db.close()
 
 
-def search(query: str) -> list[dict]:
+def vector_search(query: str) -> list[dict]:
     """質問を埋め込み、近いページを最大RAG_TOP_K件返す。"""
     if not isinstance(query, str) or not query.strip():
         raise ValueError("検索語が空です。")
@@ -136,6 +136,131 @@ def search(query: str) -> list[dict]:
             FROM chunks ORDER BY distance, page_id LIMIT ?
         """, (sqlite_vec.serialize_float32(vector), RAG_TOP_K))
         return [dict(row) for row in rows]
+
+
+def add_neighbor_pages(hits: list[dict], pages: list[dict]) -> list[dict]:
+    """検索ヒットに同じ資料内の前後1ページを追加し、重複を除く。"""
+    pages_by_document = defaultdict(list)
+    for page in pages:
+        pages_by_document[page["document_id"]].append(page)
+
+    positions = {}
+    for document_pages in pages_by_document.values():
+        document_pages.sort(key=lambda page: (page["page"], page["page_id"]))
+        for index, page in enumerate(document_pages):
+            positions[page["page_id"]] = (document_pages, index)
+
+    results = []
+    seen = set()
+
+    # 検索順位を変えないため、まず元のヒットをすべて追加する。
+    for hit in hits:
+        page_id = hit["page_id"]
+        if page_id in seen:
+            continue
+        results.append({**hit, "retrieval_source": "vector"})
+        seen.add(page_id)
+
+    # その後、各ヒットと同じ資料にある前後1ページを追加する。
+    for hit in hits:
+        position = positions.get(hit["page_id"])
+        if position is None:
+            continue
+
+        document_pages, index = position
+        for neighbor_index in (index - 1, index + 1):
+            if not 0 <= neighbor_index < len(document_pages):
+                continue
+
+            neighbor = document_pages[neighbor_index]
+            page_id = neighbor["page_id"]
+            if page_id in seen:
+                continue
+
+            results.append({
+                **neighbor,
+                "distance": None,
+                "retrieval_source": "neighbor",
+                "seed_page_id": hit["page_id"],
+            })
+            seen.add(page_id)
+
+    return results
+
+
+def search(query: str) -> list[dict]:
+    """質問を埋め込み、近いページを最大RAG_TOP_K件返す。"""
+    return vector_search(query)
+
+
+def search_with_neighbors(query: str) -> list[dict]:
+    """ベクトル検索結果と、同じ資料内の前後1ページを返す。"""
+    hits = search(query)
+
+    # 実際の検索結果にはpage_idとdocument_idが含まれる。
+    # テスト用モックなど、必要な識別情報がない結果は従来どおり返す。
+    required_keys = {"page_id", "document_id"}
+    if any(not required_keys.issubset(hit) for hit in hits):
+        return hits
+
+    return add_neighbor_pages(hits, load_pages(RAG_SOURCE))
+
+
+
+def search_hybrid(query: str) -> list[dict]:
+    """ベクトル検索、前後ページ、Graph候補を優先順位付きで統合する。"""
+    vector_hits = search(query)
+    pages = load_pages(RAG_SOURCE)
+
+    # 前後ページ付き候補。先頭には元のベクトル検索結果が並ぶ。
+    neighbor_hits = add_neighbor_pages(vector_hits, pages)
+
+    # Graphは従来どおり純粋なベクトル検索を入口にする。
+    graph_result = search_graph(query)
+
+    results = []
+    positions = {}
+
+    def add(candidate: dict, source: str, priority: int) -> None:
+        page_id = candidate["page_id"]
+
+        if page_id in positions:
+            existing = results[positions[page_id]]
+            sources = existing.setdefault("retrieval_sources", [])
+            if source not in sources:
+                sources.append(source)
+            existing["hybrid_priority"] = min(
+                existing["hybrid_priority"],
+                priority,
+            )
+            return
+
+        item = {
+            **candidate,
+            "retrieval_sources": [source],
+            "hybrid_priority": priority,
+        }
+        positions[page_id] = len(results)
+        results.append(item)
+
+    # 1. ベクトル検索結果を最優先する。
+    for hit in vector_hits:
+        add(hit, "vector", 0)
+
+    # 2. 前後ページを追加する。
+    for hit in neighbor_hits:
+        if hit.get("retrieval_source") == "neighbor":
+            add(hit, "neighbor", 1)
+
+    # 3. Graphの入口と追加候補を統合する。
+    for hit in graph_result["seeds"]:
+        add(hit, "graph_seed", 2)
+
+    for hit in graph_result["expanded"]:
+        add(hit, "graph_expanded", 3)
+
+    # 挿入順を維持しつつ、入力増加を最大件数で制御する。
+    return results[:HYBRID_MAX_RESULTS]
 
 
 def search_graph(query: str) -> dict:
@@ -202,7 +327,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="エージェントを使わず、講義資料の検索だけを実行する")
     parser.add_argument("query", help="調べたい内容")
     args = parser.parse_args()
-    for i, result in enumerate(search(args.query), 1):
+    for i, result in enumerate(search_with_neighbors(args.query), 1):
         print(f"\n{'=' * 60}\n検索結果 {i}\n{'=' * 60}")
         print(f"講義: {result['document_title']}")
         print(f"章: {result['section']}")
