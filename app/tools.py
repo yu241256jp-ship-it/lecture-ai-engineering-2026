@@ -4,6 +4,7 @@
 説明文を書き換えると、モデルがツールを使うかどうか・どんな引数で呼ぶかが変わる。
 """
 
+import random
 import json
 from functools import cache
 from pathlib import Path
@@ -126,3 +127,32 @@ def search_graph(query: str) -> str:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
     except APIError as e:
         return json.dumps({"error": api_error_message(e.code)}, ensure_ascii=False)
+def make_quiz(lecture: int) -> str:
+    """
+    指定した講義回の内容から確認問題を1問作る。
+    利用者が確認問題やクイズを求めたときに使う。
+    """
+    glossary = load_glossary()
+
+    candidates = [
+        item for item in glossary
+        if item.get("lecture") == lecture
+    ]
+
+    if not candidates:
+        return json.dumps(
+            {
+                "error": f"第{lecture}回の用語が見つかりません"
+            },
+            ensure_ascii=False,
+        )
+
+    term = random.choice(candidates)
+
+    return json.dumps(
+        {
+            "question": f"「{term['term']}」の意味は？",
+            "answer": term["definition"],
+        },
+        ensure_ascii=False,
+    )
