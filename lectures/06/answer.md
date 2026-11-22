@@ -6,7 +6,7 @@
 
 - STEP 1 のツールの名前：glossary_search_glossary
 - STEP 2 の [tool call]：[tool call] glossary_search_glossary({'query': '3レベル'})
-- STEP 3 の [tool call]：[tool call] fetch_fetch({'url': 'https://modelcontextprotocol.io/'}
+- STEP 3 の [tool call]： [tool call] fetch_fetch({'url': 'https://modelcontextprotocol.io/'})
 - STEP 4 の [tool call]：[tool call] aws_aws___search_documentation({'search_phrase': 'Amazon S3 バージョニング 概要'})
 - 気づき・疑問：
 ・glossary MCP を追加すると、講座独自の用語を検索できるようになった。
@@ -20,15 +20,17 @@
 
 - 取り組んだレベル：発展
 - やったこと：
-・VS Code における MCP サーバーの設定方法を調査した。
-・command を利用するローカル MCP サーバーと、url を利用するリモート MCP サーバーの違いを調べた。
-・今回の演習で利用した glossary、fetch、AWS の設定方法と比較した。
+・MCP公式ドキュメントを fetch MCP を利用して調査した。
+・VS Code公式ドキュメントを fetch MCP を利用して調査した。
+・command(stdio)方式と url(http)方式の違い、設定場所、有効範囲を比較した。
 - 結果：
-・command を利用する場合はローカルで MCP サーバーのプロセスを起動する。
-・url を利用する場合は公開されている MCP サーバーへ接続する。
-・VS Code ではユーザー単位またはワークスペース単位で MCP サーバーを設定できる。
-・今回の演習で利用した app/mcp_servers.json も同じ考え方で MCP サーバーを管理していた
+・MCPサーバーには stdio(command) 方式と http(url) 方式があることを確認した。
+・stdio方式はローカルでコマンドを実行して MCPサーバーを起動する方式である。
+・http方式は公開されているMCPサーバーへURLで接続する方式である。
+・VS Codeでは「MCP: Add Server」や「Chat: Open Customizations」からサーバーを追加できる。
+・設定の有効範囲として、ユーザー全体で利用する Global 設定と、プロジェクト単位で利用する Workspace 設定（.mcp.json）があることを確認した。
+・今回の演習では glossary と fetch が command方式、AWS MCP が url方式だった。
 - 気づき・疑問：
-・MCP によって LLM が外部ツールを利用できる仕組みを実際に体験できた。
-・同じ MCP でもローカル実行とリモート接続の両方に対応していることが分かった。
-・AWS MCP では公式ドキュメント検索が利用でき、用途に応じてさまざまなサーバーを組み合わせられると感じた。
+・MCPサーバーの接続方法は異なるが、どちらもLLMへツールを提供するという目的は同じだった。
+・VS Codeでは設定画面から簡単にMCPサーバーを追加できることが分かった。
+・MCPによって外部サービスやローカルツールを統一的に利用できる仕組みが便利だと感じた。
